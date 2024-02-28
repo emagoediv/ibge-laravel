@@ -2,8 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Models\City;
 use App\Services\Ibge\IbgeService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 
 class StateCitiesImportCommand extends Command
 {
@@ -12,7 +14,7 @@ class StateCitiesImportCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'ibge:import-from-state';
+    protected $signature = 'ibge:import-from-state {slug?}';
 
     /**
      * The console command description.
@@ -26,44 +28,35 @@ class StateCitiesImportCommand extends Command
      */
         public function handle(IbgeService $service)
         {
-            $state = $this->choice(
+            $state = $this->argument("slug") ?? $this->choice(
                 "Insira a UF (sigla) do estado que deseja importar os municípios:",
                 $this->getStates()
             );
-            $service->getCitiesByStateSlug($state);
+            $state = $this->transformState($state);
+            $cities = $service->getCitiesByStateSlug($state);
+            $this->persistCities($cities);
+            return self::SUCCESS;
         }
         private function getStates() {
-            $states = [
-                ['slug' => 'AC', 'name' => 'Acre'],
-                ['slug' => 'AL', 'name' => 'Alagoas'],
-                ['slug' => 'AP', 'name' => 'Amapá'],
-                ['slug' => 'AM', 'name' => 'Amazonas'],
-                ['slug' => 'BA', 'name' => 'Bahia'],
-                ['slug' => 'CE', 'name' => 'Ceará'],
-                ['slug' => 'DF', 'name' => 'Distrito Federal'],
-                ['slug' => 'ES', 'name' => 'Espirito Santo'],
-                ['slug' => 'GO', 'name' => 'Goiás'],
-                ['slug' => 'MA', 'name' => 'Maranhão'],
-                ['slug' => 'MS', 'name' => 'Mato Grosso do Sul'],
-                ['slug' => 'MT', 'name' => 'Mato Grosso'],
-                ['slug' => 'MG', 'name' => 'Minas Gerais'],
-                ['slug' => 'PA', 'name' => 'Pará'],
-                ['slug' => 'PB', 'name' => 'Paraíba'],
-                ['slug' => 'PR', 'name' => 'Paraná'],
-                ['slug' => 'PE', 'name' => 'Pernambuco'],
-                ['slug' => 'PI', 'name' => 'Piauí'],
-                ['slug' => 'RJ', 'name' => 'Rio de Janeiro'],
-                ['slug' => 'RN', 'name' => 'Rio Grande do Norte'],
-                ['slug' => 'RS', 'name' => 'Rio Grande do Sul'],
-                ['slug' => 'RO', 'name' => 'Rondônia'],
-                ['slug' => 'RR', 'name' => 'Roraima'],
-                ['slug' => 'SC', 'name' => 'Santa Catarina'],
-                ['slug' => 'SP', 'name' => 'São Paulo'],
-                ['slug' => 'SE', 'name' => 'Sergipe'],
-                ['slug' => 'TO', 'name' => 'Tocantins']
-            ];
+            $states = config("states");
             return collect($states)
                             ->map(fn($state) => $state["slug"] . " - " . $state["name"])
                             ->toArray();
+        }
+        private function transformState(string $state) 
+        {
+            return substr($state,0,2);
+        }
+
+        private function persistCities(array $cities)
+        {
+            collect($cities)
+                ->chunk(500)
+                ->each(function (Collection $citiesChunk) {
+                    $citiesChunk->each(fn ($city) => City::query()->create([
+                        "state" => $city["microrregiao"]["mesorregiao"]["UF"]["sigla"],
+                        "name" => $city["nome"]
+                    ]));
+                });
         }
 }

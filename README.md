@@ -1,17 +1,17 @@
 # Desafio: comando que importa as cidades para o banco com base na UF
 
-# Taks:
+# Tasks:
 
 - [x]  Criar comando no artisan
 - [x]  Criar serviço de consulta dentro do laravel
-- [ ]  Consultar a api pelo serviço a partir do comando
-- [ ]  Criar tabelas do banco
-- [ ]  Ao rodar comando, salvar no banco os dados que o serviço retornou a partir do comando
+- [x]  Consultar a api pelo serviço a partir do comando
+- [x]  Criar tabela do banco
+- [x]  Ao rodar comando, salvar no banco os dados que o serviço retornou a partir do comando
 
-## Laravel: 10.x
+# Configuração do projeto:
 
+### Laravel: 10.x
 ### PHP: 8.3
-
 ### Api utilizada:
 
 [API de localidades](https://servicodados.ibge.gov.br/api/docs/localidades#api-Municipios-estadosUFMunicipiosGet)
@@ -30,7 +30,7 @@ Ao executar o comando acima o laravel irá criar um novo arquivo em app/Console/
 
  
 
-```
+```php
 class StateCitiesImportCommand extends Command
 {
     /**
@@ -153,7 +153,7 @@ class IbgeService {
 
 E importaremos essa classe para o nosso handle() do comando 
 
-```
+```php
  public function handle(IbgeService $service)
         {
             $state = $this->choice(
@@ -168,4 +168,116 @@ Agora ao executar o comando e selecionarmos 25(SP), recebemos
 
 ```php
 "chegou em aqui em SP - São Paulo" // app\Services\Ibge\IbgeService.php:17
+```
+
+## Requisição
+
+Agora para fazer uma requisição real iremos implementar:
+
+```php
+public function getCitiesByStateSlug(string $slug) 
+  {
+    $uri = sprintf("localidades/estados/%s/municipios",$slug);
+    $response = $this->client->get($uri);
+    return json_decode($response->getBody());
+  }
+```
+
+Agora já pegamos as cidades, mas ainda devemos armazenar o resultado em um banco de dados
+
+Configurando seu .env e criando um banco, você já poderá rodar o comando:
+
+`php artisan make:model City --migration`
+
+Na migration gerada implementamos a configuração da tabela, sua estrutura:
+
+```php
+Schema::create('cities', function (Blueprint $table) {
+            $table->id();
+            $table->string("state",3)->index();
+            $table->string("name");
+            $table->timestamps();
+        });
+```
+
+E na model, para liberar as colunas para realizar o CRUD, na model colocamos:
+
+```php
+ protected $table = "cities";
+
+    protected $fillable = [
+        "state",
+        "name"
+    ];
+```
+
+# Testes
+
+## Teste de Integração
+
+para verificar o resultado esperado da realização do comando, criaremos um arquivo para realizar o teste em tests/Feature/Console/StatesCitiesImportCommandTests.php
+
+Faremos uma alteração para receber algumentos no comando na Classe StatesCitiesImportCommand
+
+```php
+$state = $this->argument("slug") ?? $this->choice(
+                "Insira a UF (sigla) do estado que deseja importar os municípios:",
+                $this->getStates()
+            );
+```
+
+Agora se rodarmos `php artisan ibge:import-from-state TO` esse comando substitui a necessidade de responder a uma seleção do estado desejado onde TO pode ser substituído por qualquer UF
+
+Nosso teste deve rodar o comando artisan e verificar no banco de dados se os dados foram cadastrados:
+
+```php
+ public function test_base_import()
+  {
+    //prepara
+    //agi
+    $this->artisan("ibge:import-from-state", ["slug"=>"DF"]);
+
+    //verifica
+    $this->assertDatabaseHas("cities",[
+      "state"=>"DF",
+      "name"=>"Brasilia"
+    ]);
+  }
+```
+
+Agora podemos criar uma função para persistir os dados no banco
+
+```php
+   private function persistCities(array $cities)
+        {
+            collect($cities)
+                ->chunk(500)
+                ->each(function (Collection $citiesChunk) {
+                    $citiesChunk->each(fn ($city) => City::query()->create([
+                        "state" => $city["microrregiao"]["mesorregiao"]["UF"]["sigla"],
+                        "name" => $city["nome"]
+                    ]));
+                });
+        }
+```
+
+E enviaremos $cities
+
+```php
+$cities = $service->getCitiesByStateSlug($state);
+$this->persistCities($cities);
+return self::SUCCESS;
+```
+
+Rodando `php artisan test` você pode verificar se ocorreu tudo como o esperado
+
+Para a organização do código criaremos uma arquivo em config/ que somente retorna os arrays com as slugs e então a função que retorna os estados fica:
+
+```php
+ private function getStates() {
+            $states = config("states");
+            return collect($states)
+                            ->map(fn($state) => $state["slug"] . " - " . $state["name"])
+                            ->toArray();
+        }
 ```

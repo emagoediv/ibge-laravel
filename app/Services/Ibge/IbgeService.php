@@ -4,16 +4,23 @@ namespace App\Services\Ibge;
 
 use GuzzleHttp\Client;
 
-class IbgeService {
+class IbgeService 
+{
   private Client $client;
+  
   public function __construct()
   {
     $this->client = new Client([
-      "base_url" => "https://servicodados.ibge.gov.br/api/v1",
-      "timeout" => 5.0
+      "base_uri" => "https://servicodados.ibge.gov.br/api/v1/",
+      "timeout" => 5.0,
+      "verify" => false,
     ]);
   }
-  public function getCitiesByStateSlug(string $slug) {
-    dd("chegou em aqui em $slug");
+
+  public function getCitiesByStateSlug(string $slug) 
+  {
+    $uri = sprintf("localidades/estados/%s/municipios",$slug);
+    $response = $this->client->get($uri);
+    return json_decode($response->getBody(),true);
   }
 }
